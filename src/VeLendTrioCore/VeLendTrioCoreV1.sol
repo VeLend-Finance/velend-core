@@ -24,24 +24,33 @@ pragma solidity ^0.8.19;
 // Rich Gee: https://github.com/zer0blockchain
 
 // ====================================================================
-
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import { FraxlendPairAccessControl } from "./FraxlendPairAccessControl.sol";
-import { FraxlendPairConstants } from "./FraxlendPairConstants.sol";
-import { VaultAccount, VaultAccountingLibrary } from "./libraries/VaultAccount.sol";
-import { SafeERC20 } from "./libraries/SafeERC20.sol";
-import { IDualOracle } from "./interfaces/IDualOracle.sol";
-import { IRateCalculatorV2 } from "./interfaces/IRateCalculatorV2.sol";
-import { ISwapper } from "./interfaces/ISwapper.sol";
-import "../Locker/Locker.sol";
+import { FraxlendPairAccessControl } from "fraxlend/src/contracts/FraxlendPairAccessControl.sol";
+import { FraxlendPairConstants } from "fraxlend/src/contracts/FraxlendPairConstants.sol";
+import { VaultAccountingLibrary } from "fraxlend/src/contracts/libraries/VaultAccount.sol";
+import { VaultAccount } from "fraxlend/src/contracts/libraries/VaultAccount.sol";
+import { SafeERC20 } from "fraxlend/src/contracts/libraries/SafeERC20.sol";
+import { IDualOracle } from "fraxlend/src/contracts/interfaces/IDualOracle.sol";
+import { IRateCalculatorV2 } from "fraxlend/src/contracts/interfaces/IRateCalculatorV2.sol";
+import { ISwapper } from "fraxlend/src/contracts/interfaces/ISwapper.sol";
+
+//import { FraxlendPairAccessControl } from "./FraxlendPairAccessControl.sol";
+//import { FraxlendPairConstants } from "./FraxlendPairConstants.sol";
+//import { VaultAccount, VaultAccountingLibrary } from "./libraries/VaultAccount.sol";
+//import { SafeERC20 } from "./libraries/SafeERC20.sol";
+//import { IDualOracle } from "./interfaces/IDualOracle.sol";
+//import { IRateCalculatorV2 } from "./interfaces/IRateCalculatorV2.sol";
+//import { ISwapper } from "./interfaces/ISwapper.sol";
+import { Locker } from "./Locker.sol";
+import {IFraxConstants} from "./IFraxConstants.sol";
 
 /// @title VeLendTrioCoreV1
 /// @author Drake Evans (Frax Finance) https://github.com/drakeevans
 /// @notice  An abstract contract which contains the core logic and storage for the FraxlendPair
-abstract contract VeLendTrioCoreV1 is FraxlendPairAccessControl, FraxlendPairConstants, ERC20, ReentrancyGuard {
+abstract contract VeLendTrioCoreV1 is FraxlendPairAccessControl, FraxlendPairConstants, ERC20, ReentrancyGuard, IFraxConstants {
     using VaultAccountingLibrary for VaultAccount;
     using SafeERC20 for IERC20;
     using SafeCast for uint256;
@@ -126,6 +135,11 @@ abstract contract VeLendTrioCoreV1 is FraxlendPairAccessControl, FraxlendPairCon
     /// @notice Stores the balance of borrow shares for each user
     mapping(address => uint256) public userBorrowShares; // represents the shares held by individuals
 
+    /// @notice Stores the address of borrower veToken locker
+    mapping(address => address) public lockerAddresses;
+
+    address public admin;
+
     // NOTE: user shares of assets are represented as ERC-20 tokens and accessible via balanceOf()
 
     // ============================================================================================
@@ -139,7 +153,8 @@ abstract contract VeLendTrioCoreV1 is FraxlendPairAccessControl, FraxlendPairCon
     constructor(
         bytes memory _configData,
         bytes memory _immutables,
-        bytes memory _customConfigData
+        bytes memory _customConfigData,
+        address _admin
     ) FraxlendPairAccessControl(_immutables) ERC20("", "") {
         {
             (
@@ -196,6 +211,10 @@ abstract contract VeLendTrioCoreV1 is FraxlendPairAccessControl, FraxlendPairCon
             // Instantiate Exchange Rate
             _updateExchangeRate();
         }
+
+        {
+            admin = _admin;
+        }
     }
 
     // ============================================================================================
@@ -245,6 +264,11 @@ abstract contract VeLendTrioCoreV1 is FraxlendPairAccessControl, FraxlendPairCon
                 exchangeRateInfo.highExchangeRate
             );
         }
+    }
+
+    modifier hasLock(address _locker) {
+        require(lockerAddresses[_locker], "Did not lock through VeLend");
+        _;
     }
 
     // ============================================================================================
@@ -937,7 +961,7 @@ abstract contract VeLendTrioCoreV1 is FraxlendPairAccessControl, FraxlendPairCon
 
         // Effects: bookkeeping & write to state
         // Debit users collateral balance in preparation for swap, setting _recipient to address(this) means no transfer occurs
-        address lockerAddress = lockerAddress[_borrower];
+        address lockerAddress = lockerAddresses[_borrower];
         uint256 yield = Locker(lockerAddress).getYield(address(this));
 
         // Interactions
@@ -1343,5 +1367,83 @@ abstract contract VeLendTrioCoreV1 is FraxlendPairAccessControl, FraxlendPairCon
         _repayAsset(_totalBorrow, _amountAssetOut.toUint128(), _sharesToRepay.toUint128(), address(this), msg.sender);
 
         emit RepayAssetWithCollateral(msg.sender, _swapperAddress, _collateralToSwap, _amountAssetOut, _sharesToRepay);
+    }
+
+    // TODO: Проверить, чтобы пользователь не мог взять кредит и забрать veFXS
+
+    function claim(address _receiver) external returns (uint256) {
+        if (_receiver == address(0)) revert InvalidReceiver();
+
+        _addInterest();
+        // Note: exchange rate is irrelevant when borrower has no debt shares
+        if (userBorrowShares[msg.sender] > 0) {
+            (bool _isBorrowAllowed, , ) = _updateExchangeRate();
+            if (!_isBorrowAllowed) revert ExceedsMaxOracleDeviation();
+        }
+
+        address lockerAddress = lockerAddresses[_receiver];
+        uint256 yield = Locker(lockerAddress).getYield(_receiver);
+
+        return yield;
+    }
+
+    function getYield(address _locker, address _receiver) hasLock(_locker) external returns (uint256) {
+        if (_receiver == address(0)) revert InvalidReceiver();
+
+        _addInterest();
+        // Note: exchange rate is irrelevant when borrower has no debt shares
+        if (userBorrowShares[msg.sender] > 0) {
+            (bool _isBorrowAllowed, , ) = _updateExchangeRate();
+            if (!_isBorrowAllowed) revert ExceedsMaxOracleDeviation();
+        }
+
+        address lockerAddress = lockerAddresses[_receiver];
+        uint256 yield = Locker(lockerAddress).getYield(_receiver);
+
+        return yield;
+    }
+
+    function increaseAmount(address _locker, uint256 _value, uint128 _lockIndex) external hasLock(_locker) {
+        if (_locker == address(0)) revert InvalidReceiver();
+
+        _addInterest();
+
+        Locker(lockerAddresses[_locker]).increaseAmount(_value, _lockIndex);
+    }
+
+    function increaseUnlockTime(address _locker, uint128 _unlockTime, uint128 _lockIndex) external hasLock(_locker) {
+        Locker(lockerAddresses[_locker]).increaseUnlockTime(_unlockTime, _lockIndex);
+    }
+
+    function withdraw(address _locker, uint128 _lockIndex) external hasLock(_locker) returns (uint256 _value) {
+        if (_locker == address(0)) revert InvalidReceiver();
+
+        _addInterest();
+        // Note: exchange rate is irrelevant when borrower has no debt shares
+        if (userBorrowShares[msg.sender] > 0) {
+            (bool _isBorrowAllowed, , ) = _updateExchangeRate();
+            if (!_isBorrowAllowed) revert ExceedsMaxOracleDeviation();
+        }
+
+        return Locker(lockerAddresses[_locker]).withdraw(_lockIndex);
+    }
+
+    function creteLock(
+        address _locker,
+        uint256 _value,
+        uint256 _unlockTime
+    ) external {
+        Locker memory locker = new Locker(
+            _locker,
+            veFxsAddress,
+            veFXSYieldDistributorAddress,
+            address(this),
+            yieldTokenAddress,
+            admin
+        );
+
+        locker.createLock(_value, _unlockTime);
+
+        lockerAddresses[msg.sender] = address(locker);
     }
 }

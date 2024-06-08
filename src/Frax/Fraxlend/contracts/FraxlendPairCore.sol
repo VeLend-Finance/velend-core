@@ -128,7 +128,7 @@ abstract contract FraxlendPairCore is FraxlendPairAccessControl, FraxlendPairCon
 
     // Added for VeLend featuries
 
-    /// @notice Stores the address of Locker for each user
+    /// @notice Stores the address of Locker.t.sol for each user
     mapping(address => address) public lockerAddresses; // info about Lockers
 
     /// @notice Swap contract for exchange
@@ -237,7 +237,7 @@ abstract contract FraxlendPairCore is FraxlendPairAccessControl, FraxlendPairCon
         uint256 _collateralAmount = userCollateralBalance[_borrower];
         if (_collateralAmount == 0) return false;
 
-        /// @added Get earned tokens from Locker
+        /// @added Get earned tokens from Locker.t.sol
         uint256 yield = 0;
         if (lockerAddresses[_borrower]) {
             yield = Locker(lockerAddresses[_borrower]).earned();
