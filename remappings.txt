@@ -7,6 +7,8 @@
 @openzeppelin-contracts/=lib/frax-solidity/lib/openzeppelin-contracts/
 @staking/=/src/hardhat/contracts/Staking/
 @uniswap/=lib/frax-solidity/node_modules/@uniswap/
+@fraxtal-contracts/=lib/fraxtal-contracts/src/
+@fraxlend/=lib/fraxlend/src/
 base64-sol/=lib/frax-solidity/node_modules/base64-sol/
 ds-test/=lib/fraxlend/lib/ds-test/src/
 erc4626-tests/=lib/openzeppelin-contracts/lib/erc4626-tests/
@@ -20,3 +22,4 @@ hardhat/=lib/frax-solidity/node_modules/hardhat/
 openzeppelin-contracts/=lib/openzeppelin-contracts/
 prb-math/=lib/frax-solidity/node_modules/prb-math/
 truffle/=lib/frax-solidity/node_modules/truffle/
+@src/=src/

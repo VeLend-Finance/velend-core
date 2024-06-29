@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: ISC
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.20;
 
 // ====================================================================
 // |     ______                   _______                             |
@@ -28,20 +28,22 @@ pragma solidity ^0.8.19;
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import { FraxlendPairConstants } from "./FraxlendPairConstants.sol";
-import { FraxlendPairCore } from "./FraxlendPairCore.sol";
-import { Timelock2Step } from "./Timelock2Step.sol";
-import { SafeERC20 } from "./libraries/SafeERC20.sol";
-import { VaultAccount, VaultAccountingLibrary } from "./libraries/VaultAccount.sol";
-import { IRateCalculatorV2 } from "./interfaces/IRateCalculatorV2.sol";
-import { ISwapper } from "./interfaces/ISwapper.sol";
+import { FraxlendPairConstants } from "@fraxlend/contracts/FraxlendPairConstants.sol";
+import { Timelock2Step } from "@fraxlend/contracts/Timelock2Step.sol";
+import { SafeERC20 } from "@fraxlend/contracts/libraries/SafeERC20.sol";
+import { VaultAccount, VaultAccountingLibrary } from "@fraxlend/contracts/libraries/VaultAccount.sol";
+import { IRateCalculatorV2 } from "@fraxlend/contracts/interfaces/IRateCalculatorV2.sol";
+import { ISwapper } from "@fraxlend/contracts/interfaces/ISwapper.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-/// @title FraxlendPair
-/// @author Drake Evans (Frax Finance) https://github.com/drakeevans
+import { VeLendTrioCoreV1 } from "@src/VelendTrioCore/VelendTrioCoreV1.sol";
+
+/// @title VelendTrio
+/// @author Monetiqe x Drake Evans (Frax Finance) https://github.com/drakeevans
 /// @notice  The FraxlendPair is a lending pair that allows users to engage in lending and borrowing activities
-contract FraxlendPair is IERC20Metadata, FraxlendPairCore {
+contract VelendTrio is IERC20Metadata, VeLendTrioCoreV1 {
     using VaultAccountingLibrary for VaultAccount;
     using SafeERC20 for IERC20;
     using SafeCast for uint256;
@@ -49,11 +51,13 @@ contract FraxlendPair is IERC20Metadata, FraxlendPairCore {
     /// @param _configData abi.encode(address _asset, address _collateral, address _oracle, uint32 _maxOracleDeviation, address _rateContract, uint64 _fullUtilizationRate, uint256 _maxLTV, uint256 _cleanLiquidationFee, uint256 _dirtyLiquidationFee, uint256 _protocolLiquidationFee)
     /// @param _immutables abi.encode(address _circuitBreakerAddress, address _comptrollerAddress, address _timelockAddress)
     /// @param _customConfigData abi.encode(string memory _nameOfContract, string memory _symbolOfContract, uint8 _decimalsOfContract)
+    /// @param _admin admin
     constructor(
         bytes memory _configData,
         bytes memory _immutables,
-        bytes memory _customConfigData
-    ) FraxlendPairCore(_configData, _immutables, _customConfigData) {}
+        bytes memory _customConfigData,
+        address _admin
+    ) VeLendTrioCoreV1(_configData, _immutables, _customConfigData, _admin) Ownable(msg.sender){}
 
     // ============================================================================================
     // ERC20 Metadata

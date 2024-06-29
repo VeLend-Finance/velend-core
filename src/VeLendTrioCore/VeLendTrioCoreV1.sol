@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: ISC
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.20;
 
 // ====================================================================
 // |     ______                   _______                             |
@@ -28,29 +28,23 @@ import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import { FraxlendPairAccessControl } from "fraxlend/src/contracts/FraxlendPairAccessControl.sol";
-import { FraxlendPairConstants } from "fraxlend/src/contracts/FraxlendPairConstants.sol";
-import { VaultAccountingLibrary } from "fraxlend/src/contracts/libraries/VaultAccount.sol";
-import { VaultAccount } from "fraxlend/src/contracts/libraries/VaultAccount.sol";
-import { SafeERC20 } from "fraxlend/src/contracts/libraries/SafeERC20.sol";
-import { IDualOracle } from "fraxlend/src/contracts/interfaces/IDualOracle.sol";
-import { IRateCalculatorV2 } from "fraxlend/src/contracts/interfaces/IRateCalculatorV2.sol";
-import { ISwapper } from "fraxlend/src/contracts/interfaces/ISwapper.sol";
-
-//import { FraxlendPairAccessControl } from "./FraxlendPairAccessControl.sol";
-//import { FraxlendPairConstants } from "./FraxlendPairConstants.sol";
-//import { VaultAccount, VaultAccountingLibrary } from "./libraries/VaultAccount.sol";
-//import { SafeERC20 } from "./libraries/SafeERC20.sol";
-//import { IDualOracle } from "./interfaces/IDualOracle.sol";
-//import { IRateCalculatorV2 } from "./interfaces/IRateCalculatorV2.sol";
-//import { ISwapper } from "./interfaces/ISwapper.sol";
-import { Locker } from "./Locker.sol";
-import {IFraxConstants} from "./IFraxConstants.sol";
+import { FraxlendPairAccessControl } from "@fraxlend/contracts/FraxlendPairAccessControl.sol";
+import { FraxlendPairConstants } from "@fraxlend/contracts/FraxlendPairConstants.sol";
+import { VaultAccountingLibrary } from "@fraxlend/contracts/libraries/VaultAccount.sol";
+import { VaultAccount } from "@fraxlend/contracts/libraries/VaultAccount.sol";
+import { SafeERC20 } from "@fraxlend/contracts/libraries/SafeERC20.sol";
+import { IDualOracle } from "@fraxlend/contracts/interfaces/IDualOracle.sol";
+import { IRateCalculatorV2 } from "@fraxlend/contracts/interfaces/IRateCalculatorV2.sol";
+import { ISwapper } from "@fraxlend/contracts/interfaces/ISwapper.sol";
+import { Locker } from "@src/VeLendTrioCore/Locker.sol";
 
 /// @title VeLendTrioCoreV1
 /// @author Drake Evans (Frax Finance) https://github.com/drakeevans
 /// @notice  An abstract contract which contains the core logic and storage for the FraxlendPair
-abstract contract VeLendTrioCoreV1 is FraxlendPairAccessControl, FraxlendPairConstants, ERC20, ReentrancyGuard, IFraxConstants {
+abstract contract VeLendTrioCoreV1 is FraxlendPairAccessControl, FraxlendPairConstants, ERC20, ReentrancyGuard {
+    address public veFxsAddress = 0x54bd5c72645fed784C117cA83533e0584b24Ee5c;
+    address public veFXSYieldDistributorAddress = 0x39333a540bbea6262e405E1A6d435Bd2e776561E;
+    address public yieldTokenAddress = 0xFc00000000000000000000000000000000000002;
     using VaultAccountingLibrary for VaultAccount;
     using SafeERC20 for IERC20;
     using SafeCast for uint256;
@@ -267,7 +261,7 @@ abstract contract VeLendTrioCoreV1 is FraxlendPairAccessControl, FraxlendPairCon
     }
 
     modifier hasLock(address _locker) {
-        require(lockerAddresses[_locker], "Did not lock through VeLend");
+        require(lockerAddresses[_locker] != address(0), "Did not lock through VeLend");
         _;
     }
 
@@ -938,7 +932,7 @@ abstract contract VeLendTrioCoreV1 is FraxlendPairAccessControl, FraxlendPairCon
         uint256 _amountAssetOutMin,
         address[] calldata _path,
         address _borrower
-    ) external {
+    ) external returns (uint256 _amountAssetOut) {
         // Accrue interest if necessary
         _addInterest();
 
@@ -1403,7 +1397,7 @@ abstract contract VeLendTrioCoreV1 is FraxlendPairAccessControl, FraxlendPairCon
         return yield;
     }
 
-    function increaseAmount(address _locker, uint256 _value, uint128 _lockIndex) external hasLock(_locker) {
+    function increaseAmount(address _locker, uint128 _value, uint128 _lockIndex) external hasLock(_locker) {
         if (_locker == address(0)) revert InvalidReceiver();
 
         _addInterest();
@@ -1415,25 +1409,12 @@ abstract contract VeLendTrioCoreV1 is FraxlendPairAccessControl, FraxlendPairCon
         Locker(lockerAddresses[_locker]).increaseUnlockTime(_unlockTime, _lockIndex);
     }
 
-    function withdraw(address _locker, uint128 _lockIndex) external hasLock(_locker) returns (uint256 _value) {
-        if (_locker == address(0)) revert InvalidReceiver();
-
-        _addInterest();
-        // Note: exchange rate is irrelevant when borrower has no debt shares
-        if (userBorrowShares[msg.sender] > 0) {
-            (bool _isBorrowAllowed, , ) = _updateExchangeRate();
-            if (!_isBorrowAllowed) revert ExceedsMaxOracleDeviation();
-        }
-
-        return Locker(lockerAddresses[_locker]).withdraw(_lockIndex);
-    }
-
     function creteLock(
         address _locker,
-        uint256 _value,
-        uint256 _unlockTime
+        uint128 _value,
+        uint128 _unlockTime
     ) external {
-        Locker memory locker = new Locker(
+        Locker locker = new Locker(
             _locker,
             veFxsAddress,
             veFXSYieldDistributorAddress,
